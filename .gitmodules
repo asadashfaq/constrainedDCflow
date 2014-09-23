@@ -1,0 +1,3 @@
+[submodule "aurespf"]
+	path = aurespf
+	url = git@github.com:AUESG/aurespf.git
