@@ -13,7 +13,8 @@ class Test__solve_DC_flows_(unittest.TestCase):
                                   = DCs.build_DC_network(self.N, copper=True)
         self.Nlinks = len(au.AtoKh(self.N)[-1])
         self.Nnodes = len(self.N)
-        self.testtimesteps = [0, 7, 50, 100, 1434, 32049, 198391]
+        self.testtimesteps = [52094, 52095, 52096, \
+                              0, 7, 50, 100, 1434, 32049, 198391]
 
     def test_number_of_vars(self):
         for t in self.testtimesteps:
