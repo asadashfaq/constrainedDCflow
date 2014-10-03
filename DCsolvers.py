@@ -7,7 +7,7 @@ from copy import deepcopy
 
 def build_DC_network(N, copper=False, h0=None, b=1):
     K = au.AtoKh_old(N)[0]
-    h0 = au.AtoKh(N)[-2]
+    H = au.AtoKh(N)[-2]
     Nlinks = len(au.AtoKh(N)[-1])
     Nnodes = len(N)
 
@@ -59,7 +59,6 @@ def build_DC_network(N, copper=False, h0=None, b=1):
 ##### constraints on the flows f^-_l <= [K^T L^+ \Phi]_l <= f^+_ l ##########
     if (h0 != None):
         H = h0
-
     h_neg = -b*H[1:Nlinks*2:2] # lower bound on link flow
     h_pos = b*H[0:Nlinks*2:2] # upper bound on link flow
 
@@ -90,7 +89,7 @@ def build_DC_network(N, copper=False, h0=None, b=1):
                                               netexport_vars[m])
 
     network.setParam("OutputFlag", 0)
-    network.setParam("FeasibilityTol", 1e-4)
+    network.setParam("FeasibilityTol", 1e-6)
     network.update()
 
     return network, sum_of_squared_flows
@@ -120,7 +119,7 @@ def DC_solve(N, mode='linear', h0=None, b=1.0, lapse=None, msg="power flows"):
 
 #### Setting up the model ####################################################
     network, sum_of_squared_flows = build_DC_network(N,\
-                                                    copper=copper, h0=h0, b=1)
+                                                    copper=copper, h0=h0, b=b)
 
 #### Preparing for collection of the data from the solution of the network ###
     balancing = np.zeros((Nnodes, length_of_timeseries))
@@ -152,8 +151,7 @@ def DC_solve(N, mode='linear', h0=None, b=1.0, lapse=None, msg="power flows"):
 
 
 #### Saving the results in a Nodes object ####################################
-    solved_nodes = deepcopy(N)
-    for n in solved_nodes:
+    for n in N:#solved_nodes:
         n.balancing = balancing[n.id, :]
         n.curtailment = curtailment[n.id, :]
         n.solved = True
@@ -164,13 +162,14 @@ def DC_solve(N, mode='linear', h0=None, b=1.0, lapse=None, msg="power flows"):
                     (T/60.0-np.mod(T/60.0,1), np.mod(T,60), relaxations, \
                             total_tries-len(lapse))
 
-    return solved_nodes, deepcopy(flow)
+    return N, flow
 
 
 def _solve_DC_flows_(network, N, t, mode, sum_of_squared_flows, mean_loads):
 
     Nnodes = len(N)
     relaxed = 0
+    tries = 0
 
 #### Set the rhs to be the actual mismatch in the NodalEnergyBalance #####
 #### for each node #######################################################
@@ -202,51 +201,19 @@ def _solve_DC_flows_(network, N, t, mode, sum_of_squared_flows, mean_loads):
 
     network.update()
 
-#### Solve step 1 and save objective ######################################
+#### Solve step 1 and save results or objective ###############################
     network.optimize()
-    bal_opt = network.objVal
-    step1_bal = [b.x for b in balancing_vars]
-    step1_curt = [c.x for c in curtailment_vars]
 
-#### Set up step 2 constraints ############################################
-    if 'linear' in mode:
-        network.addConstr(lhs=gb.quicksum(balancing_vars), sense='<=',\
-                           rhs=bal_opt, name="sumofbalconstr")
+    # the synchronized flow (square) only need the first step to uniquely
+    # determine the injection pattern and thus the flows
     if 'square' in mode:
-        for n in xrange(Nnodes):
-            balancing_vars[n].ub = step1_bal[n]*1.00000001
-            balancing_vars[n].lb = step1_bal[n]*0.99999999
-            curtailment_vars[n].ub = step1_curt[n]*1.00000001
-            curtailment_vars[n].lb = step1_curt[n]*0.99999999
-
-    network.update()
-
-#### Set up step 2 objective ##############################################
-    network.setObjective(expr=sum_of_squared_flows, sense=1)
-    network.update()
-
-#### Solve step 2 and save results #######################################
-    tries = 0
-    try:
-        tries += 1
-        network.optimize()
-        result = [var.x for var in network.getVars()]
-    except gb.GurobiError:
         try:
-            if 'linear' in mode:
-                tries += 1
-                print "Model status: ", network.status
-                network.getConstrs()[-1].setAttr("rhs", bal_opt*1.00001)
-                network.optimize()
-                result = [var.x for var in network.getVars()]
-                relaxed += 1
-            if 'square' in mode:
-                raise gb.GurobiError(0,0) #this is just to go to the next block
-
+            tries += 1
+            result = [var.x for var in network.getVars()]
         except gb.GurobiError as error:
             tries += 1
             print "Model status: ", network.status
-            print "Second step error, timestep: %i" % t
+            print "First step error, timestep: %i" % t
             print type(error)
             print error.errno
             network_relaxed = network.copy()
@@ -256,20 +223,54 @@ def _solve_DC_flows_(network, N, t, mode, sum_of_squared_flows, mean_loads):
             network_relaxed.optimize()
             result = [var.x for var in network_relaxed.getVars()[0:(3*Nnodes)]]
 
-    #print "Number of tries: %i" %(tries)
+    # the localized flow (linear) need a second optimization step to uniquely
+    # determine the injection pattern
+    elif 'linear' in mode:
+        bal_opt = network.objVal
+        step1_bal = [b.x for b in balancing_vars]
+        step1_curt = [c.x for c in curtailment_vars]
 
+#### Set up step 2 constraints ############################################
+        network.addConstr(lhs=gb.quicksum(balancing_vars), sense='<=',\
+                           rhs=bal_opt, name="sumofbalconstr")
+        network.update()
+
+#### Set up step 2 objective ##############################################
+        network.setObjective(expr=sum_of_squared_flows, sense=1)
+        network.update()
+
+#### Solve step 2 and save results #######################################
+        try:
+            tries += 1
+            network.optimize()
+            result = [var.x for var in network.getVars()]
+        except gb.GurobiError:
+            try:
+                tries += 1
+                print "Model status: ", network.status
+                network.getConstrs()[-1].setAttr("rhs", bal_opt*1.00001)
+                network.optimize()
+                result = [var.x for var in network.getVars()]
+                relaxed += 1
+            except gb.GurobiError as error:
+                tries += 1
+                print "Model status: ", network.status
+                print "Second step error, timestep: %i" % t
+                print type(error)
+                print error.errno
+                network_relaxed = network.copy()
+                network_relaxed.feasRelaxS(0,0,0,1)
+                network_relaxed.update()
+                relaxed += 1
+                network_relaxed.optimize()
+                result = [var.x for var in network_relaxed.getVars()[0:(3*Nnodes)]]
 
 #### Clean up ###########################################################
-    if 'linear' in mode:
         network.remove(network.getConstrs()[-1])
-
-    if 'square' in mode:
-        for n in xrange(Nnodes):
-            balancing_vars[n].lb = 0.0
-            balancing_vars[n].ub = gb.GRB.INFINITY
-            curtailment_vars[n].lb = 0.0
-            curtailment_vars[n].ub = gb.GRB.INFINITY
-    network.update()
-
+        network.update()
+    else:
+        print "Error: Mode not understood, network not solved.\
+                Try 'linear' or 'square'"
+        return
 
     return result, relaxed, tries
