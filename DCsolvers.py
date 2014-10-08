@@ -96,6 +96,20 @@ def build_DC_network(N, copper=False, h0=None, b=1):
 
 
 def DC_solve(N, mode='linear', h0=None, b=1.0, lapse=None, msg="power flows"):
+    """ This function analogous to solve(...) in aurespf.solvers
+        It can be called with the same syntax, but does not include storage,
+        and the only accepted modes are 'linear' and 'square'.
+        In the unconstrained case this flow implementation is equvalent
+        to the one in aurespf.solver, but in constrained networks it yields
+        physically correct phase angle flows, unlike the implementation in
+        aurespf.solver.
+
+        Example
+        -------
+        solve(mynodes, mode='linear', h0=myh0, b=0.45)
+
+        """
+
     print msg
 #### Loading in common parameters ############################################
     copper = ('copper' in mode)
