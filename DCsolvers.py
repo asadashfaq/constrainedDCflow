@@ -99,7 +99,7 @@ def DC_solve(N, mode='linear', h0=None, b=1.0, lapse=None, msg="power flows"):
     """ This function analogous to solve(...) in aurespf.solvers
         It can be called with the same syntax, but does not include storage,
         and the only accepted modes are 'linear' and 'square'.
-        In the unconstrained case this flow implementation is equvalent
+        In the unconstrained case this flow implementation is equivalent
         to the one in aurespf.solver, but in constrained networks it yields
         physically correct phase angle flows, unlike the implementation in
         aurespf.solver.
@@ -241,8 +241,6 @@ def _solve_DC_flows_(network, N, t, mode, sum_of_squared_flows, mean_loads):
     # determine the injection pattern
     elif 'linear' in mode:
         bal_opt = network.objVal
-        step1_bal = [b.x for b in balancing_vars]
-        step1_curt = [c.x for c in curtailment_vars]
 
 #### Set up step 2 constraints ############################################
         network.addConstr(lhs=gb.quicksum(balancing_vars), sense='<=',\
