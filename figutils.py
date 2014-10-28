@@ -1,7 +1,13 @@
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+import matplotlib
 import numpy as np
+import networkx as nx
+import copy
+
 
 import aurespf.solvers as au
+import PCA_tools as PCA
 from europe_plusgrid import europe_plus_Nodes
 from FCResult import FCResult
 from FCResult import myhist
@@ -9,8 +15,8 @@ from FlowCalculation import FlowCalculation
 
 #### Colorschemes ################################
 
-dth = (3.425)
 dcolwidth = (2*3.425+0.236)
+colwidth = (3.425)
 
 blue = '#134b7c'
 yellow = '#f8ca00'
@@ -90,6 +96,29 @@ all_links = ['AUT to CHE',
 
 links_of_interest = ['AUT to DEU', 'BGR to ROU', 'FIN to SWE', 'POL to DEU',
                      'PRT to ESP', 'FRA to GBR', 'GRC to ITA']
+
+all_countries = ['AUT', 'FIN', 'NLD', 'BIH', 'FRA', 'NOR', 'BEL','GBR', \
+                 'POL', 'BGR', 'GRC', 'PRT', 'CHE', 'HRV', 'ROU', 'CZE',\
+                 'HUN', 'SRB', 'DEU', 'IRL', 'SWE', 'DNK', 'ITA', 'SVN',\
+                 'ESP', 'LUX', 'SVK', 'EST', 'LVA', 'LTU']
+
+ISO3ISO2dict = {'AUT':'AT', 'FIN':'FI', 'NLD':'NL', 'BIH':'BA',\
+            'FRA':'FR', 'NOR':'NO', 'BEL':'BE','GBR':'GB', 'POL':'PL',\
+            'BGR':'BG', 'GRC':'GR', 'PRT':'PT', 'CHE':'CH', 'HRV':'HR',\
+            'ROU':'RO', 'CZE':'CZ', 'HUN':'HU', 'SRB':'RS', 'DEU':'DE',\
+            'IRL':'IE', 'SWE':'SE', 'DNK':'DK', 'ITA':'IT', 'SVN':'SI',\
+            'ESP':'ES', 'LUX':'LU', 'SVK':'SK', 'EST':'EE', 'LVA':'LV',\
+            'LTU':'LT'}
+
+all_countries_ISO2 = [ISO3ISO2dict[c] for c in all_countries]
+## translate all_links to ISO2 country codes
+all_links_ISO2 = []
+for l in all_links:
+    l_ISO2 = copy.deepcopy(l)
+    for c in all_countries:
+        if c in l_ISO2:
+            l_ISO2 = l_ISO2.replace(c, ISO3ISO2dict[c])
+    all_links_ISO2.append(l_ISO2)
 
 ############################################################################
 ########## Plotting functions ##############################################
@@ -199,7 +228,8 @@ def make_all_bal_vs_trans():
 
 
 def plot_bal_vs_trans(ydatalabel='BE', mode='lin', interactive=True,
-        figfilename=None, savepath='./results/figures/BalvsTrans/'):
+        figfilename=None, savepath='./results/figures/BalvsTrans/',
+        beta_TC=False):
     """ Makes a plot of Backup energy (BE) or backup capacity (BC)
         as a function of transmission capacity, for Rolando's and
         the new flow implementation.
@@ -224,13 +254,22 @@ def plot_bal_vs_trans(ydatalabel='BE', mode='lin', interactive=True,
             filename = str(fc)+'.pkl'
             ydata.append(sum(get_data(filename, ydatalabel, datapath))\
                             /total_mean_load)
-        plt.plot(TC, ydata,\
+        if not beta_TC:
+            plt.plot(TC, ydata,\
                          label=fc.pretty_solvermode()) # TC in TW
+        else:
+            plt.plot(scalefactors, ydata,\
+                         label=fc.pretty_solvermode())
 
     plt.ylim(0,1.1*max(ydata))
-    plt.xlim(0,max(TC))
     plt.legend(loc=4)
-    plt.xlabel('Total transmission capacity [TW]')
+    if not beta_TC:
+        plt.xlabel('Total transmission capacity [TW]')
+        plt.xlim(0,max(TC))
+    else:
+        plt.xlabel(r'$\beta$')
+        plt.xlim(0,1.5)
+
     if ydatalabel=='BE':
         plt.ylabel('Backup energy [normalized]')
     elif ydatalabel=='BC':
@@ -276,6 +315,7 @@ def plot_RF_vs_DCF(capacities, mode, link_number, interactive=True,\
         plt.savefig(savepath+figfilename)
         plt.close()
 
+    return DC_F, R_F
 
 
 def explain_peak_scatter_plot(filename='Europe_aHE_0.1q99_DC_sqr_flows.npy',\
@@ -513,10 +553,233 @@ def uncond_diff_moments_mesh(mode='lin', moment_number=1,\
         plt.savefig(savepath+figfilename)
 
 
+def Farmer_crit_plot(capacities, solvermode, filename=None, interactive=True):
+    plt.close('all')
+    plt.ioff()
+    if interactive:
+        plt.ion()
+    F = PCA.load_flows(capacities, solvermode, filename)
+    Phi, K = PCA.FtoPhi(F)
+    Nnodes = Phi.shape[0]
+    Phi_c, mean_Phi = PCA.center(Phi)
+    h, Ntilde = PCA.normalize(Phi_c)
+
+    lambdas = np.empty(Nnodes)
+    for k in xrange(Nnodes):
+        lambdas[k] = PCA.get_principal_component(h, k)[0]
+        xi = PCA.get_xi_weight(h, k)
+        assert(np.mean(xi**2)-lambdas[k] <= 1e-8)
+
+    plt.semilogy(1+np.arange(Nnodes), lambdas, '.')
+    plt.ylim(1e-6,1.0)
+    plt.xlabel(r'$k$')
+    plt.ylabel(r'$\lambda_k$')
+    plt.title(solvermode + ': ' + capacities)
+    figfilename = 'lambdavsk_' + solvermode + '_' + capacities + '.pdf'
+    if not interactive:
+        plt.savefig('./results/figures/FarmerCritPlots/' + figfilename)
+    return lambdas
+
+
+def initial_explore_PC_F(capacities, solvermode, comp_number, filename=None):
+    plt.close('all')
+    plt.ion()
+    F = PCA.load_flows(capacities, solvermode, filename)
+    Phi, K = PCA.FtoPhi(F)
+    Nnodes = Phi.shape[0]
+    Phi_c, mean_Phi = PCA.center(Phi)
+    h, Ntilde = PCA.normalize(Phi_c)
+    lambd, PC = PCA.get_principal_component(h, comp_number)
+
+    Phi_PC = PCA.unnormalize_uncenter(PC, Ntilde, mean_Phi)
+    F_PC = PCA.PhitoF(Phi_PC, K)
+
+    left1 = np.arange(len(F_PC))
+    plt.bar(left1, F_PC)
+    plt.xticks(left1 + 0.5, all_links, rotation=90, size=6)
+    plt.ylabel(r'$F_l$' + ' [MW]')
+    plt.title(solvermode + ': ' + capacities + ', k=' + str(comp_number+1))
+
+    plt.figure()
+    left2 = np.arange(len(Phi_PC))
+    plt.bar(left2, Phi_PC)
+    plt.xticks(left2 + 0.5, all_countries, rotation=90)
+    plt.ylabel(r'$\Phi_n$' + ' [MW]')
+    plt.title(solvermode + ': ' + capacities + ', k=' + str(comp_number+1))
+
+    xi = PCA.get_xi_weight(h, comp_number)
+    plt.figure()
+    plt.hist(xi, bins=530, ec='none', normed=True)
+    plt.xlabel(r'$\xi_' + str(comp_number+1) + '$')
+    plt.ylabel(r'$p(\xi_' + str(comp_number+1) + ')$')
+    plt.title(solvermode + ': ' + capacities + ', k=' + str(comp_number+1))
+
+
+def xi_hist(capacities, solvermode, comp_number, filename=None,
+                figfilename=None, savepath='./results/figures/xihists/',
+                interactive=True):
+    plt.close('all')
+    if interactive:
+        plt.ion()
+
+    F = PCA.load_flows(capacities, solvermode, filename)
+    Phi, K = PCA.FtoPhi(F)
+    Nnodes = Phi.shape[0]
+    Phi_c, mean_Phi = PCA.center(Phi)
+    h, Ntilde = PCA.normalize(Phi_c)
+    xi = PCA.get_xi_weight(h, comp_number)
+    plt.figure()
+    plt.hist(xi, bins=530, ec='none', normed=True)
+    plt.xlabel(r'$\xi_' + str(comp_number+1) + '$')
+    plt.ylabel(r'$p(\xi_' + str(comp_number+1) + ')$')
+    plt.title(solvermode + ': ' + capacities + ', k=' + str(comp_number+1))
+
+    if not figfilename:
+        figfilename = 'xiHist_'+solvermode+'_'+capacities+'_k'\
+                       +str(comp_number+1)+'.pdf'
+    if not interactive:
+        plt.savefig(savepath+figfilename)
+
+def PC_graph(capacities, solvermode, comp_number, filename=None,\
+        figfilename=None, savepath='./results/figures/PCgraphs/'):
+    plt.close('all')
+    plt.ion()
+
+    F = PCA.load_flows(capacities=capacities, solvermode=solvermode,\
+                        filename=filename)
+    Phi, K = PCA.FtoPhi(F)
+    Nnodes = Phi.shape[0]
+    Phi_c, mean_Phi = PCA.center(Phi)
+    h, Ntilde = PCA.normalize(Phi_c)
+    lambd, PC = PCA.get_principal_component(h, comp_number)
+
+    Phi_PC = PCA.unnormalize_uncenter(PC, Ntilde, mean_Phi)
+    print Phi_PC
+    F_PC = PCA.PhitoF(Phi_PC, K)
+
+    title = solvermode + ': ' + capacities + ' k=' + str(comp_number+1)
+    if not figfilename:
+        figfilename = 'PCgraph_'+solvermode+'_'+capacities+'_k'\
+                       +str(comp_number+1)+'.pdf'
+    make_europe_graph(lambd, comp_number,\
+            link_weights=F_PC, node_weights=Phi_PC, title=title, \
+            figfilename=figfilename, savepath=savepath)
+
+
+def make_europe_graph(lambd, comp_number, link_weights, node_weights,\
+        figfilename, savepath, title=None):
+    plt.ioff()
+    print node_weights
+    print len(node_weights)
+    G = nx.Graph()
+    nodelist = all_countries_ISO2
+    linklist = [[link[0:2], link[-2:], all_links_ISO2.index(link)] \
+                for link in all_links_ISO2]
+
+    print linklist
+    for n in nodelist:
+        G.add_node(n)
+
+    for l in linklist:
+        G.add_edge(l[0], l[1], weight = link_weights[l[2]])
+
+    pos={}
+
+    pos['AT']=[0.55,0.45]
+    pos['FI']=[.95,1.1]
+    pos['NL']=[0.40,0.85]
+    pos['BA']=[0.65,0.15]
+    pos['FR']=[0.15,0.60]
+    pos['NO']=[0.5,1.1]
+    pos['BE']=[0.275,0.775]
+    pos['GB']=[0.10,1.05]
+    pos['PL']=[0.75,0.8]
+    pos['BG']=[0.9,0.0]
+    pos['GR']=[0.7,0.0]
+    pos['PT']=[0.0,0.15]
+    pos['CH']=[0.4,0.45]
+    pos['HR']=[0.75,0.3]
+    pos['RO']=[1.0,0.15]
+    pos['CZ']=[0.75,0.60]
+    pos['HU']=[1.0,0.45]
+    pos['RS']=[0.85,0.15]
+    pos['DE']=[0.45,0.7]
+    pos['IE']=[0.0,0.95]
+    pos['SE']=[0.75,1.0]
+    pos['DK']=[0.5,0.875]
+    pos['IT']=[0.4,0.2]
+    pos['SI']=[0.55,0.3]
+    pos['ES']=[0.15,0.35]
+    pos['LU']=[0.325,0.575]
+    pos['SK']=[0.90,0.55]
+    pos['EE']=[1.03,0.985]
+    pos['LV']=[0.99,0.85]
+    pos['LT']=[0.925,0.72]
+
+
+    redgreendict = {'red':[(0.0, 1.0, 1.0), (0.5, 1.0, 1.0) ,(1.0, 0.0, 0.0)],
+                    'green':[(0.0, 0.0, 0.0), (0.5, 1.0, 1.0), (1.0, 1.0, 1.0)],
+                    'blue':[(0.0, 0.2, 0.0), (0.5, 1.0, 1.0), (1.0, 0.2, 0.0)]}
+
+
+    cmap = LinearSegmentedColormap('redgreen', redgreendict, 1000)
+
+    fig = plt.figure(dpi=400, figsize=(0.85*dcolwidth,0.85*dcolwidth*0.8))
+    ax1 = fig.add_axes([0.05, 0.08, 0.9, 0.08])
+    ax2 = fig.add_axes([-0.05, 0.15, 1.1, 0.95])
+
+    span = 2*np.max(np.abs(node_weights))
+    norm_node_weights = [w/span+0.5 for w in node_weights]
+    print norm_node_weights
+    node_colors = [cmap(w) for w in norm_node_weights]
+    nx.draw_networkx_nodes(G, pos, node_size=400, nodelist=nodelist,\
+            node_color=node_colors)
+    nx.draw_networkx_labels(G, pos, font_size=10.8, font_color='k', \
+                            font_family='sans-serif')
+
+    maxflow = np.max(np.abs(link_weights))
+    no_arrow_limit = 0.05*maxflow
+    arrow_length = 0.05
+    for l in linklist:
+        if -no_arrow_limit<link_weights[l[2]]<no_arrow_limit: continue
+        if link_weights[l[2]]>=no_arrow_limit:
+            x0 = pos[l[0]][0]
+            y0 = pos[l[0]][1]
+            x1 = pos[l[1]][0]
+            y1 = pos[l[1]][1]
+        if link_weights[l[2]]<=-no_arrow_limit:
+            x1 = pos[l[0]][0]
+            y1 = pos[l[0]][1]
+            x0 = pos[l[1]][0]
+            y0 = pos[l[1]][1]
+        dist = np.sqrt((x0-x1)**2 + (y0-y1)**2)
+        plt.arrow(x0, y0, 0.4*(x1-x0), 0.4*(y1-y0), fc=blue, ec=blue,\
+                    head_width= 1.2*arrow_length*(abs(link_weights[l[2]]))/maxflow,\
+                    head_length = arrow_length)
+
+
+    nx.draw_networkx_edges(G, pos, edgelist = G.edges(), edge_color=blue)
+
+    cb1 = matplotlib.colorbar.ColorbarBase(ax1, cmap, orientation='vhorizontal')
+    cb1.set_ticks([0, 0.5, 1])
+    cb1.set_ticklabels(['-1', '0', '1'])
+    ax1.set_xlabel(r'$\Phi_n$' + ' [normalized]')
+    ax1.xaxis.set_label_position('top')
+    ax1.set_xticks('none')
+    ax2.axis('off')
+    strk = str(comp_number+1)
+    strpercentlambd = '%2.1f' % (100*lambd)
+    ax2.text(-0.1, 1.1, r'$\lambda_'+strk+'='+strpercentlambd+'\%$')
+    if title!=None:
+        fig.suptitle(title)
+    fig.savefig(savepath+figfilename)
+
+    return G
+
+
 ##############################################################################
 ############## Auxilary functions ############################################
 ##############################################################################
-
 
 def get_pretty_mode(mode):
     """ Auxilary function that transforms 'lin' into 'Localized flow'
@@ -579,3 +842,4 @@ def almost_equal(x, y, abstol=0.01):
         """
 
     return (np.abs(x-y)<=abstol)
+
