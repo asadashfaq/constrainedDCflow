@@ -120,6 +120,100 @@ for l in all_links:
             l_ISO2 = l_ISO2.replace(c, ISO3ISO2dict[c])
     all_links_ISO2.append(l_ISO2)
 
+
+##############################################################################
+############## Auxilary functions ############################################
+##############################################################################
+
+def get_pretty_mode(mode):
+    """ Auxilary function that transforms 'lin' into 'Localized flow'
+        and 'sqr' into 'Synchronized flow'.
+
+        """
+
+    return mode.replace('lin', 'Localized').replace('sqr', 'Synchronized')\
+                        + ' flow'
+
+def get_pretty_imp_and_mode(mode):
+    prettymode = get_pretty_mode(mode)
+    if 'DC' in mode:
+        prettymodeimp = prettymode[3:-4] + 'phase angle flow'
+    else:
+        prettymodeimp = prettymode[0:-4] + 'minimal dissipation flow'
+
+    return prettymodeimp
+
+def get_beta_string(capacities_str):
+    """ Auxilary function to get a beta value from the capacities field
+        in a FlowCalculation object. Returns '0.45' if given '0.45q99' and
+        r'$\infty$' if given 'copper'.
+
+        """
+
+    if capacities_str=='copper':
+        return r'$\infty$'
+    else:
+        return capacities_str[0:-3]
+
+
+def get_data(filename, field, path='./results/'):
+    """ Returns the data in a certain field,
+        from an FCResult file.
+        See the FCResult class for available fields.
+
+        Example
+        -------
+        >>> get_data("eurasia_aHE_0.95q99_lin.pkl", 'Total_TC')
+
+        """
+
+    result = FCResult(filename, path=path)
+    returnvalue = result.cache[0][field]
+
+    return returnvalue
+
+
+def get_flow_hist_data(filename, link_number, path='./results/LinkCapSweeps/',\
+                        bins=530, normed=False):
+    """ This function returns values and count for a histogram along the
+        flow on the specified link, with a specified filename.
+        The default bins is 530 uniformly spaced bins -
+        ~ sqrt(len(timeseries))
+
+        """
+
+    F = np.load(path+filename)
+    value, count = myhist(F[link_number], bins=bins, normed=normed)
+    return value, count
+
+
+def almost_equal(x, y, abstol=0.01):
+    """ This is a auxilary function returning True if the input values are
+        closer than a given absolut tolerance (0.01).
+
+        """
+
+    return (np.abs(x-y)<=abstol)
+
+
+def get_maxed_out_prob(F, link, reltol=1e-3):
+    """ Returns the probability that the flow on a link is
+        within reltol of the transmission capacity of the link.
+
+        """
+
+    fminus = min(F[link])
+    fplus = max(F[link])
+    lenght_of_timeseries = len(F[link])
+    p_plus = float(len(F[link][np.where(F[link]>(1-reltol)*fplus)]))\
+                    /lenght_of_timeseries
+    p_minus = float(len(F[link][np.where(F[link]<(1-reltol)*fminus)]))\
+                    /lenght_of_timeseries
+
+    return p_plus+p_minus
+
+
+
 ############################################################################
 ########## Plotting functions ##############################################
 ############################################################################
@@ -157,11 +251,11 @@ def make_flow_hist_gif_figs(mode, link_number, savepath, xlim, ylim):
 
     for c in caps:
         fclist = [FlowCalculation('Europe', 'aHE', c, m) for m in modes]
-        figfilename = all_links[link_number].replace(' ', '') + '_' + mode\
-                        + ('_%02i.png'%(caps.index(c)))
+        figfilename = all_links_ISO2[link_number].replace(' ', '') + '_' + mode\
+                        + ('_%02i.pdf'%(caps.index(c)))
         plot_flow_hists(fclist=fclist, link_number=link_number,\
                         interactive=False, figfilename=figfilename,\
-                        savepath=savepath,
+                        savepath=savepath, varparam='implementation',
                         semilogy=True, xlim=xlim, ylim=ylim, showbeta=True)
 
 
@@ -184,7 +278,12 @@ def plot_flow_hists(fclist, link_number, varparam='solvermode',\
         filename = str(fc) + '_flows.npy'
         value, count = get_flow_hist_data(filename, link_number)
         if varparam=='solvermode':
-            label = fc.pretty_solvermode()
+            label = get_pretty_mode(fc.solvermode)
+        if varparam=='implementation':
+            if 'DC' in fc.solvermode:
+                label = 'Phase angle flow'
+            else:
+                label = 'Minimal dissipation flow'
         if semilogy:
             plt.semilogy(value, count, label=label)
         else:
@@ -192,10 +291,10 @@ def plot_flow_hists(fclist, link_number, varparam='solvermode',\
 
     plt.legend()
     if not showbeta:
-        plt.title(all_links[link_number])
+        plt.title(all_links_ISO2[link_number])
     else:
-        beta_str = get_beta_string(fclist[0].capacities[0:-3])
-        plt.title(all_links[link_number] + ': ' + r'$\beta=$' + beta_str)
+        beta_str = get_beta_string(fclist[0].capacities)
+        plt.title(all_links_ISO2[link_number] + ': ' + r'$\beta=$' + beta_str)
 
     plt.xlabel('Power flow [MW]')
     plt.ylabel('Count')
@@ -206,13 +305,45 @@ def plot_flow_hists(fclist, link_number, varparam='solvermode',\
         plt.ylim(ylim)
 
     if not figfilename:
-        figfilename = ''.join([all_links[link_number].replace(' ', ''), '_',\
+        figfilename = ''.join([all_links_ISO2[link_number].replace(' ', ''), '_',\
                                 fclist[0].solvermode, '_', \
                                 fclist[0].capacities, '.pdf'])
     if not interactive:
         plt.savefig(savepath+figfilename)
         plt.close()
 
+
+def flow_hist_subplots(mode, link_numbers=[24, 31],\
+                         capacities=['0.1q99', 'copper']):
+    plt.close('all')
+    subplot_count = 1
+    fig = plt.figure(figsize=(10,9))
+
+    for link_number in link_numbers:
+        for caps in capacities:
+            filename = 'Europe_aHE_' + caps + '_' + mode + '_flows.npy'
+            DC_filename = 'Europe_aHE_' + caps + '_DC_' + mode + '_flows.npy'
+            value, count = get_flow_hist_data(filename, link_number)
+            DC_value, DC_count = get_flow_hist_data(DC_filename, link_number)
+            plt.subplot(2,2,subplot_count)
+            plt.semilogy(value/1e3, count, label='Minimal dissipation flow')
+            plt.semilogy(DC_value/1e3, DC_count, label='Phase angle flow')
+            beta_str = get_beta_string(caps)
+            plt.title(all_links_ISO2[link_number] + ': ' \
+                            + r'$\beta=$' + beta_str)
+            plt.xlabel(r'$F_l$' + ' [GW]')
+            plt.ylabel('Count')
+            if subplot_count == 2 and mode=='lin':
+                plt.xlim((-14, 21))
+            if subplot_count == 3 and mode=='sqr':
+                plt.xlim((-1.1, 1.1))
+            plt.legend(prop={'size':10})
+            subplot_count += 1
+
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.915)
+    fig.suptitle(get_pretty_mode(mode), fontsize=24)
+    fig.savefig('./results/figures/four_flow_hists_' + mode + '.pdf')
 
 def make_all_bal_vs_trans():
     """ Calls plot_bal_vs_trans(...) in the four relevant cases.
@@ -227,9 +358,46 @@ def make_all_bal_vs_trans():
     return
 
 
+def plot_bal_vs_trans_quotients(interactive=True):
+    datapath = './results/LinkCapSweeps/'
+    plt.close()
+    if interactive:
+        plt.ion()
+    scalefactors = np.linspace(0,1.5,31)
+    ydatalabels = ['BE', 'BC']
+    modes = ['lin', 'sqr']
+    subplot_counter = 1
+    for ydatalabel in ydatalabels:
+        for m in modes:
+            ydata = []
+            for a in scalefactors:
+                capstr = str(a) + 'q99'
+                fc = FlowCalculation('Europe', 'aHE', capstr, m)
+                DC_fc = FlowCalculation('Europe', 'aHE', capstr, 'DC_' + m)
+                filename = str(fc)+'.pkl'
+                DC_filename = str(DC_fc)+'.pkl'
+                ydata.append(sum(get_data(filename, ydatalabel, datapath))\
+                            /sum(get_data(DC_filename, ydatalabel, datapath)))
+            ax = plt.subplot(2,1,subplot_counter)
+            ax.plot(scalefactors, ydata, label=get_pretty_mode(m))
+        ax.legend(loc=4)
+        ax.set_xlim(0,1.5)
+        if ydatalabel=='BE':
+            ax.set_ylabel(\
+                    r'$E_B^\mathrm{min.\,diss.}/E_B^\mathrm{phase\,angle}$')
+        else:
+            ax.set_ylabel(\
+                    r'$C_B^\mathrm{min.\,diss.}/C_B^\mathrm{phase\,angle}$')
+        ax.set_xlabel(r'$\beta$')
+        subplot_counter += 1
+    plt.tight_layout()
+    if not interactive:
+        plt.savefig('./results/figures/BEBCsubplotcomparison.pdf')
+
+
 def plot_bal_vs_trans(ydatalabel='BE', mode='lin', interactive=True,
         figfilename=None, savepath='./results/figures/BalvsTrans/',
-        beta_TC=False):
+        beta_TC=False, omitRolando=False):
     """ Makes a plot of Backup energy (BE) or backup capacity (BC)
         as a function of transmission capacity, for Rolando's and
         the new flow implementation.
@@ -243,9 +411,12 @@ def plot_bal_vs_trans(ydatalabel='BE', mode='lin', interactive=True,
 
     scalefactors = np.linspace(0,1.5,31)
     copperTC = sum(np.load('./results/Europe_copper_linkcaps_'+mode+'.npy'))
-    TC = copperTC*scalefactors/1e6
+    TC = copperTC*scalefactors/1e3
     total_mean_load = sum(np.load('./results/Europe_meanloads.npy'))
     modes = [mode, 'DC_' + mode]
+    if omitRolando:
+        modes = ['DC_' + mode]
+
     for m in modes:
         ydata = []
         for a in scalefactors:
@@ -256,15 +427,16 @@ def plot_bal_vs_trans(ydatalabel='BE', mode='lin', interactive=True,
                             /total_mean_load)
         if not beta_TC:
             plt.plot(TC, ydata,\
-                         label=fc.pretty_solvermode()) # TC in TW
+                         label=fc.pretty_solvermode()) # TC in GW
         else:
             plt.plot(scalefactors, ydata,\
                          label=fc.pretty_solvermode())
-
+    plt.plot(TC, np.min(ydata)*np.ones_like(TC), '--')
     plt.ylim(0,1.1*max(ydata))
-    plt.legend(loc=4)
+    if not omitRolando:
+        plt.legend(loc=4)
     if not beta_TC:
-        plt.xlabel('Total transmission capacity [TW]')
+        plt.xlabel('Total transmission capacity [GW]')
         plt.xlim(0,max(TC))
     else:
         plt.xlabel(r'$\beta$')
@@ -373,10 +545,10 @@ def plot_flow_corr_mesh(mode='sqr', interactive=True, sort_by_linkcaps=True,
     if sort_by_linkcaps:
         plt.pcolormesh(corr_coeff[linkcaps.argsort(),:])
         plt.yticks(0.5+np.arange(50), \
-                    np.array(all_links)[linkcaps.argsort()], fontsize=6)
+                    np.array(all_links_ISO2)[linkcaps.argsort()], fontsize=6)
     else:
         plt.pcolormesh(corr_coeff)
-        plt.yticks(0.5+np.arange(50), all_links, fontsize=6)
+        plt.yticks(0.5+np.arange(50), all_links_ISO2, fontsize=6)
 
     plt.colorbar()
     plt.xticks(20*np.linspace(0,1.5,7),\
@@ -384,9 +556,9 @@ def plot_flow_corr_mesh(mode='sqr', interactive=True, sort_by_linkcaps=True,
     plt.xlabel(r'$\beta$')
 
     if mode=='sqr':
-        plt.title('Correlation, synchronized flow')
+        plt.title('Pearson correlation, synchronized flow')
     elif mode=='lin':
-        plt.title('Correlation, localized flow')
+        plt.title('Pearson correlation, localized flow')
 
     if not figfilename:
         figfilename = ''.join(['Flowcorr_', mode, '_sorted',\
@@ -499,7 +671,8 @@ def make_selected_flowdiffhists(condition_bin_number=20,\
 
 def uncond_diff_moments_mesh(mode='lin', moment_number=1,\
                              sort_by_linkcaps=False, interactive=True,\
-                             savepath='./results/figures/', figfilename=None):
+                             savepath='./results/figures/', figfilename=None,
+                             std=False):
     """ This function plots the 1st or 2nd moment of the distribution of
         the difference between Rolando's flow and the new DC flow.
         All links are shown, for beta (constraint scale factors) from 0-1.5.
@@ -514,6 +687,7 @@ def uncond_diff_moments_mesh(mode='lin', moment_number=1,\
 
     beta = np.linspace(0.05, 1.5, 30) # scale factor for the link capacities
     moments = np.empty((50,len(beta)))
+    stds = np.empty((50, len(beta)))
     for i in range(len(beta)):
         DC_filename = 'Europe_aHE_'+str(beta[i])+'q99_DC_'+mode+'_flows.npy'
         R_filename = 'Europe_aHE_'+str(beta[i])+'q99_'+mode+'_flows.npy'
@@ -524,14 +698,22 @@ def uncond_diff_moments_mesh(mode='lin', moment_number=1,\
         for link in range(50):
             moments[link, i] = np.mean(np.power(diff[link], moment_number))\
                                 /np.power(linkcaps[link], moment_number)
+            stds[link, i] = np.std(diff[link])/linkcaps[link]
 
     if sort_by_linkcaps:
-        plt.pcolormesh(moments[linkcaps.argsort(),:])
+        if not std:
+            plt.pcolormesh(moments[linkcaps.argsort(),:])
+        else:
+            plt.pcolormesh(stds[linkcaps.argsort(),:])
         plt.yticks(0.5+np.arange(50), \
-                    np.array(all_links)[linkcaps.argsort()], fontsize=6)
+                    np.array(all_links_ISO2)[linkcaps.argsort()], fontsize=6)
     else:
-        plt.pcolormesh(moments)
-        plt.yticks(0.5+np.arange(50), all_links, fontsize=6)
+        if not std:
+            plt.pcolormesh(moments)
+        else:
+            plt.pcolormesh(stds)
+        plt.yticks(0.5+np.arange(50), all_links_ISO2, fontsize=6)
+
     plt.colorbar()
     plt.xticks(20*np.linspace(0,1.5,7),\
             [str(beta) for beta in np.linspace(0,1.5,7)])
@@ -545,14 +727,97 @@ def uncond_diff_moments_mesh(mode='lin', moment_number=1,\
         plt.title(get_pretty_mode(mode) + ': '\
                  + r'$\langle (F_l^{F^2} - F_l^\delta)^2\rangle$'\
                  + ' [normalized]')
+    if std:
+        plt.title(get_pretty_mode(mode) + ':\n '\
+         + 'std' + \
+         r'$\left( F_l^\mathrm{min.\,diss.}-F_l^\mathrm{phase\,angle} \right)$'\
+                 + ' [normalized]')
+
 
     if not figfilename:
         figfilename = ''.join(['FlowDiffMoment_', str(moment_number), '_',\
+                               mode, '_sorted', str(sort_by_linkcaps), '.pdf'])
+        if std:
+            figfilename = ''.join(['FlowDiffstd_',\
                                mode, '_sorted', str(sort_by_linkcaps), '.pdf'])
     if not interactive:
         plt.savefig(savepath+figfilename)
 
 
+def mean_abs_flow_vs_link_cap(solvermode, link_number):
+    plt.close('all')
+    plt.ion()
+
+    linkcaps = np.load('./results/Europe_copper_linkcaps_'\
+                         + solvermode[-3:] + '.npy')
+
+    beta = np.linspace(0.05, 1.5, 30) # scale factor for the link capacities
+
+    mean_abs_flow = []
+
+    for a in beta:
+        capstr = str(a) + 'q99'
+        F = PCA.load_flows(capstr, solvermode)[link_number]
+        Cl = linkcaps[link_number]*a
+        mean_abs_flow.append(np.mean(np.abs(F))/Cl)
+
+    plt.plot(beta, mean_abs_flow, '.')
+
+def flow_characteristic_mesh(solvermode='DC_lin', char='mean_abs_flow', interactive=True, sort_by_linkcaps=True,
+                savepath='./results/figures/', figfilename=None):
+    plt.close()
+    if interactive:
+        plt.ion()
+
+    linkcaps = np.load('./results/Europe_copper_linkcaps_' \
+                        + solvermode[-3:] + '.npy')
+
+    beta = np.linspace(0.05, 1.5, 30) # scale factor for the link capacities
+    flow_char = np.empty((50,len(beta)))
+    for i in range(len(beta)):
+        filename = 'Europe_aHE_'+str(beta[i])+'q99_'+solvermode+'_flows.npy'
+        F = np.load('./results/LinkCapSweeps/'+filename)
+
+        if char == 'mean_abs_flow':
+            for link in range(50):
+                fplus = beta[i]*linkcaps[link]
+                flow_char[link, i] = np.mean(np.abs(F[link]))/fplus
+        elif char == 'maxed_prob':
+            for link in range(50):
+                flow_char[link, i] = get_maxed_out_prob(F, link)
+        else:
+            print \
+             "Error: kwarg char must either 'mean_abs_flow' or 'maxed_prob'"
+
+    if sort_by_linkcaps:
+        plt.pcolormesh(flow_char[linkcaps.argsort(),:])
+        plt.yticks(0.5+np.arange(50), \
+                    np.array(all_links_ISO2)[linkcaps.argsort()], fontsize=6)
+    else:
+        plt.pcolormesh(flow_char)
+        plt.yticks(0.5+np.arange(50), all_links_ISO2, fontsize=6)
+
+    plt.colorbar()
+    plt.xticks(20*np.linspace(0,1.5,7),\
+                [str(beta) for beta in np.linspace(0,1.5,7)])
+    plt.xlabel(r'$\beta$')
+
+
+    if char == 'mean_abs_flow':
+        plt.title(get_pretty_imp_and_mode(solvermode) + ': ' \
+                                    + r'$\langle|F_l|\rangle /f_l^+ $')
+    elif char == 'maxed_prob':
+        plt.title(get_pretty_imp_and_mode(solvermode) + ': ' \
+                                    + r'$p(|F_l| = f_l^+)$')
+
+    if not figfilename:
+        figfilename = ''.join([char, '_', solvermode, '_sorted',\
+                               str(sort_by_linkcaps), '.pdf'])
+    if not interactive:
+        plt.savefig(savepath+figfilename)
+
+
+### Principal component analysis plots #############################
 def Farmer_crit_plot(capacities, solvermode, filename=None, interactive=True):
     plt.close('all')
     plt.ioff()
@@ -579,6 +844,34 @@ def Farmer_crit_plot(capacities, solvermode, filename=None, interactive=True):
     if not interactive:
         plt.savefig('./results/figures/FarmerCritPlots/' + figfilename)
     return lambdas
+
+
+def make_PC_giffigs(comp_number, solvermode):
+    capacities = [str(a) + 'q99' for a in np.linspace(0.05, 1.5, 30)]
+    for c in capacities:
+        F = PCA.load_flows(c, solvermode)
+        Phi, K = PCA.FtoPhi(F)
+        Nnodes = Phi.shape[0]
+        Phi_c, mean_Phi = PCA.center(Phi)
+        h, Ntilde = PCA.normalize(Phi_c)
+        lambd, PC = PCA.get_principal_component(h, comp_number)
+
+        Phi_PC = PCA.unnormalize_uncenter(PC, Ntilde, mean_Phi)
+        F_PC = PCA.PhitoF(Phi_PC, K)
+
+        normed_Phi_PC = Phi_PC/np.sqrt(np.sum(Phi_PC**2))
+
+        plt.figure()
+        left = np.arange(len(Phi_PC))
+        plt.bar(left, normed_Phi_PC)
+        plt.xticks(left + 0.5, all_countries_ISO2, rotation=90)
+        plt.ylabel(r'$\Phi_n$' + ' [MW]')
+        plt.ylim((-1, 1))
+        plt.title(solvermode + ': ' + c + ', k=' + str(comp_number+1))
+        no = str(capacities.index(c))
+        figfilename = solvermode + '_k' + str(comp_number+1) + '_' + no + '.png'
+        plt.savefig('./results/figures/PCbarplots/' + figfilename)
+        plt.close()
 
 
 def initial_explore_PC_F(capacities, solvermode, comp_number, filename=None):
@@ -776,70 +1069,4 @@ def make_europe_graph(lambd, comp_number, link_weights, node_weights,\
 
     return G
 
-
-##############################################################################
-############## Auxilary functions ############################################
-##############################################################################
-
-def get_pretty_mode(mode):
-    """ Auxilary function that transforms 'lin' into 'Localized flow'
-        and 'sqr' into 'Synchronized flow'.
-
-        """
-
-    return mode.replace('lin', 'Localized').replace('sqr', 'Synchronized')\
-                        + ' flow'
-
-
-def get_beta_string(capacities_str):
-    """ Auxilary function to get a beta value from the capacities field
-        in a FlowCalculation object. Returns '0.45' if given '0.45q99' and
-        r'$\infty$' if given 'copper'.
-
-        """
-
-    if capacities_str=='copper':
-        return r'$\infty$'
-    else:
-        return capacities_str[0:-3]
-
-
-def get_data(filename, field, path='./results/'):
-    """ Returns the data in a certain field,
-        from an FCResult file.
-        See the FCResult class for available fields.
-
-        Example
-        -------
-        >>> get_data("eurasia_aHE_0.95q99_lin.pkl", 'Total_TC')
-
-        """
-
-    result = FCResult(filename, path=path)
-    returnvalue = result.cache[0][field]
-
-    return returnvalue
-
-
-def get_flow_hist_data(filename, link_number, path='./results/LinkCapSweeps/',\
-                        bins=530, normed=False):
-    """ This function returns values and count for a histogram along the
-        flow on the specified link, with a specified filename.
-        The default bins is 530 uniformly spaced bins -
-        ~ sqrt(len(timeseries))
-
-        """
-
-    F = np.load(path+filename)
-    value, count = myhist(F[link_number], bins=bins, normed=normed)
-    return value, count
-
-
-def almost_equal(x, y, abstol=0.01):
-    """ This is a auxilary function returning True if the input values are
-        closer than a given absolut tolerance (0.01).
-
-        """
-
-    return (np.abs(x-y)<=abstol)
 
