@@ -32,6 +32,8 @@ aqua = '#37a688'
 darkblue = '#09233b'
 lightblue = '#8dc1e0'
 grayblue = '#4a7fa2'
+darkgrey = '#8a7e7e'
+black = '#000000'
 
 blue_cycle = [darkblue, blue, grayblue, lightblue]
 
@@ -784,7 +786,7 @@ def flow_characteristic_mesh(solvermode='DC_lin', char='mean_abs_flow', interact
                 flow_char[link, i] = np.mean(np.abs(F[link]))/fplus
         elif char == 'maxed_prob':
             for link in range(50):
-                flow_char[link, i] = get_maxed_out_prob(F, link)
+                flow_char[link, i] = get_maxed_out_prob(F, link, 2*1e-3)
         else:
             print \
              "Error: kwarg char must either 'mean_abs_flow' or 'maxed_prob'"
@@ -933,6 +935,90 @@ def xi_hist(capacities, solvermode, comp_number, filename=None,
     if not interactive:
         plt.savefig(savepath+figfilename)
 
+
+def lin_vs_sqr_allcomp_barplot(interactive=False):
+    plt.close('all')
+    if interactive:
+        plt.ion()
+
+
+    plt.figure(dpi=400, figsize=(10.2, 6))
+
+
+    modes = ['DC_lin', 'DC_sqr']
+    #prepare colors
+    colors = []
+    country_colordict = {'DE':black, 'FR':'#0055A4', 'IT':'#009246',\
+            'GB':'#003399', 'ES':'#AA1518', 'SE':'#ffc200'}
+    for c in all_countries_ISO2:
+        if c in country_colordict.keys():
+            colors.append(country_colordict[c])
+        else:
+            colors.append(darkgrey)
+
+
+    lin_PCs = []
+
+    for mode in modes:
+        # about the PCA
+        F = PCA.load_flows(capacities='copper', solvermode=mode)
+        Phi, K = PCA.FtoPhi(F)
+        Nnodes = Phi.shape[0]
+        Phi_c, mean_Phi = PCA.center(Phi)
+        h, Ntilde = PCA.normalize(Phi_c)
+
+        # for plotting
+        group_left = np.arange(1,8) - 0.5
+        group_width = 0.8
+        bin_width = group_width/30
+
+        for comp_number in range(7):
+            # PCA
+            lambd, PC = PCA.get_principal_component(h, comp_number)
+            Phi_PC = PCA.unnormalize_uncenter(PC, Ntilde, mean_Phi)
+            norm_Phi_PC = Phi_PC/np.sqrt(np.sum(Phi_PC**2))
+            if mode=='DC_lin':
+                lin_PCs.append(norm_Phi_PC)
+                if comp_number==0:
+                    PCsortby = norm_Phi_PC
+                    sorted_colors = [colors[i] for i in np.argsort(PCsortby)]
+            # plotting
+            bin_left = group_width*np.arange(30)/(30) + group_left[comp_number]
+            ax = plt.subplot(3,1,modes.index(mode)+1)
+            ax.bar(bin_left, norm_Phi_PC[np.argsort(PCsortby)],\
+                            width=bin_width, linewidth=0, color=sorted_colors)
+            ax.set_title(get_pretty_imp_and_mode(mode))
+            ax.set_ylim(-1,1)
+            ax.set_xlim(0.4,7.4)
+            if mode=='DC_sqr':
+                ax.set_ylabel(r'$\Phi_n^k$' + ' [normalized]')
+            ax.tick_params(axis='x', labelbottom='off')
+
+
+            ## handling the difference
+            if mode=='DC_sqr':
+                diff_PC = lin_PCs[comp_number] - norm_Phi_PC
+                ax = plt.subplot(3,1,3)
+
+                ax.bar(bin_left, diff_PC[np.argsort(PCsortby)],\
+                            width=bin_width, linewidth=0, color=sorted_colors)
+                ax.set_ylim(-1,1)
+                ax.set_xlim(0.4,7.4)
+                ax.set_xlabel(r'$k$')
+                colored_countries = [ 'IT', 'ES', 'FR', 'SE', 'GB', 'DE']
+                rectangles = [plt.Rectangle((0,0), 1, 1,\
+                        fc=country_colordict[c]) for c in colored_countries]
+                plt.legend(rectangles, colored_countries,\
+                                     ncol=len(colored_countries), \
+                                     prop={'size':13}, loc=4)
+                ax.set_title('Difference')
+
+        if not interactive:
+            plt.savefig('results/figures/PCA_lin_vs_sqr_allcomp.pdf')
+
+
+
+
 def PC_graph(capacities, solvermode, comp_number, filename=None,\
         figfilename=None, savepath='./results/figures/PCgraphs/'):
     plt.close('all')
@@ -957,6 +1043,7 @@ def PC_graph(capacities, solvermode, comp_number, filename=None,\
     make_europe_graph(lambd, comp_number,\
             link_weights=F_PC, node_weights=Phi_PC, title=title, \
             figfilename=figfilename, savepath=savepath)
+
 
 
 def make_europe_graph(lambd, comp_number, link_weights, node_weights,\
@@ -1021,8 +1108,14 @@ def make_europe_graph(lambd, comp_number, link_weights, node_weights,\
     ax1 = fig.add_axes([0.05, 0.08, 0.9, 0.08])
     ax2 = fig.add_axes([-0.05, 0.15, 1.1, 0.95])
 
-    span = 2*np.max(np.abs(node_weights))
-    norm_node_weights = [w/span+0.5 for w in node_weights]
+    #span = 2*np.max(np.abs(node_weights))
+    #norm_node_weights = [w/span+0.5 for w in node_weights]
+    # now the scale shows the actual phi normalized to unit length
+    # the offset and factor of 2 is because the colormap is defined
+    # from 0 to 1
+    phi_length = np.sqrt(np.sum(node_weights**2))
+    norm_node_weights = [w/(2*phi_length) + 0.5 for w in node_weights]
+
     print norm_node_weights
     node_colors = [cmap(w) for w in norm_node_weights]
     nx.draw_networkx_nodes(G, pos, node_size=400, nodelist=nodelist,\
@@ -1056,7 +1149,7 @@ def make_europe_graph(lambd, comp_number, link_weights, node_weights,\
     cb1 = matplotlib.colorbar.ColorbarBase(ax1, cmap, orientation='vhorizontal')
     cb1.set_ticks([0, 0.5, 1])
     cb1.set_ticklabels(['-1', '0', '1'])
-    ax1.set_xlabel(r'$\Phi_n$' + ' [normalized]')
+    ax1.set_xlabel(r'$\Phi_n^k$' + ' [normalized]')
     ax1.xaxis.set_label_position('top')
     ax1.set_xticks('none')
     ax2.axis('off')
