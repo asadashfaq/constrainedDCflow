@@ -10,7 +10,8 @@ class FlowCalculation:
         """
 
     def __init__(self, layout, alphas, capacities, solvermode,\
-            savemode='full', basisnetwork = 'europeplus', hourly_flowhist=False):
+            savemode='full', basisnetwork = 'europeplus', hourly_flowhist=False,\
+            mismatch_path=None):
         self.layout = layout
         self.alphas = alphas
         self.capacities = capacities
@@ -32,10 +33,18 @@ class FlowCalculation:
                                                # This is a heavy calculation (4 min for
                                                # a network) and is thus left as False as
                                                # a default.
+        self.mismatch_path = mismatch_path # if given, an artificial set of mismatches
+                                           # can be loaded into the nodes object from
+                                           # a .npy file that will be used instead of
+                                           # the real mismatch
 
     def __str__(self):
-        return ''.join([self.layout, '_', self.alphas, '_', self.capacities,
-                        '_', self.solvermode])
+        if self.mismatch_path != None:
+            return ''.join([self.layout, '_', self.alphas, '_', self.capacities,
+                '_', self.solvermode, '_', self.mismatch_path[-6:-4]])
+        else:
+            return ''.join([self.layout, '_', self.alphas, '_', self.capacities,
+                '_', self.solvermode])
 
     def copy(self):
         return FlowCalculation(self.layout, self.alphas, self.capacities,\

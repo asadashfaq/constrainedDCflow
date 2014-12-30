@@ -123,6 +123,39 @@ for l in all_links:
     all_links_ISO2.append(l_ISO2)
 
 
+## Dictionary with index of the countries in the shapefiles
+shapefile_index = {'AUT': 16,
+                     'BEL': 19,
+                     'BGR': 23,
+                     'BIH': 26,
+                     'CHE': 40,
+                     'CZE': 60,
+                     'DEU': 61,
+                     'DNK': 64,
+                     'ESP': 71,
+                     'EST': 72,
+                     'FIN': 74,
+                     'FRA': 77,
+                     'GBR': 81,
+                     'GRC': 90,
+                     'HRV': 99,
+                     'HUN': 101,
+                     'IRL': 107,
+                     'ITA': 112,
+                     'LTU': 136,
+                     'LUX': 137,
+                     'LVA': 138,
+                     'NLD': 168,
+                     'NOR': 169,
+                     'POL': 182,
+                     'PRT': 185,
+                     'ROU': 190,
+                     'SRB': 210,
+                     'SVK': 213,
+                     'SVN': 214,
+                     'SWE': 215}
+
+
 ##############################################################################
 ############## Auxilary functions ############################################
 ##############################################################################

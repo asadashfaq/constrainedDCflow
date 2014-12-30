@@ -11,6 +11,7 @@ from FCResult import FCResult # my class for storing results in a space-efficien
 def solve_flow(flow_calc):
     admat = ''.join(['./settings/', flow_calc.layout, 'admat.txt'])
     filename = str(flow_calc)
+
     copperflow_filename = ''.join(['./results/', flow_calc.layout, '_',
         flow_calc.alphas, '_copper_', flow_calc.solvermode, '_flows.npy'])
 
@@ -24,6 +25,9 @@ def solve_flow(flow_calc):
         alpha = float(flow_calc.alphas[3:]) # expects alphas on the form aHO0.4
         if flow_calc.basisnetwork == 'europeplus':
             nodes = europe_plus_Nodes(admat=admat, alphas=alpha)
+            if flow_calc.mismatch_path != None:
+                nodes = set_mismatches(nodes, flow_calc.mismatch_path)
+
         else:
             sys.stderr.write('The object has a basisnetwork that\
                           is not accounted for. Use "europeplus".')
@@ -43,8 +47,8 @@ def solve_flow(flow_calc):
 
     mode = ''.join(mode_str_list)
 
+    flowfilename = ''.join(['./results/', filename, '_flows.npy'])
 
-    flowfilename = ''.join(['./results/', str(flow_calc), '_flows.npy'])
     if 'DC' in flow_calc.solvermode:
         solver = DCs.DC_solve
     else:
@@ -92,4 +96,12 @@ def solve_flow(flow_calc):
 
     else:
         print "Results not saved, invalid savemode provided"
+
+
+def set_mismatches(nodes, mismatch_path):
+    new_mismatch = np.load(mismatch_path)
+    for i in xrange(len(nodes)):
+        nodes[i].mismatch = new_mismatch[i]
+
+    return nodes
 
