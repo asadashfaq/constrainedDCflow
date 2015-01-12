@@ -1335,3 +1335,78 @@ def plot_europe_map(country_weights, ax=None):
         country_count += 1
 
 
+def lambdas_vs_beta(mode='DC_lin'):
+
+    N = europe_plus_Nodes()
+    K = au.AtoKh_old(N)[0]
+    plt.close('all')
+    plt.ion()
+
+    fig = plt.figure(figsize=(8, 10))
+    betas = np.linspace(0.05, 1.5, 30)
+    lambdas = np.empty((30, 30))
+    ax1 = plt.subplot(2,1,1)
+    for beta in betas:
+        capacities = str(beta) + 'q99'
+        F = PCA.load_flows(capacities=capacities, solvermode=mode)
+
+        Phi, K = PCA.FtoPhi(F, K)
+        Nnodes = Phi.shape[0]
+        Phi_c, mean_Phi = PCA.center(Phi)
+        h, Ntilde = PCA.normalize(Phi_c)
+        for comp_number in np.arange(30):
+            lambd, PC = PCA.get_principal_component(h, comp_number)
+            lambdas[np.where(betas==beta)[0][0]][comp_number] = lambd
+
+    cum_lambds = np.cumsum(lambdas, axis=1)
+    for i in reversed(range(Nnodes)):
+        colorindex = np.mod(i, len(color_cycle))
+        ax1.fill_between(betas, cum_lambds[:,i],\
+                facecolor=color_cycle[colorindex])
+    ax1.set_xlim((0.05, 1.5))
+    ax1.set_ylim((0, 1.0))
+    ax1.set_xlabel(r'$\beta$')
+    ax1.set_ylabel('Sum of eigenvalues ' + r'$\lambda_k$')
+
+    if mode=='DC_sqr':
+        text_ypos = [0.1520, 0.4352, 0.6265, 0.7317, 0.8161, 0.9277]
+        significant_comps = [4, 4, 4, 4, 6,
+                             6, 6, 6, 6, 6,
+                             6, 6, 6, 6, 6,
+                             6, 6, 6, 7, 7,
+                             7, 7, 7, 7, 7,
+                             7, 7, 7, 7, 7]
+
+    if mode=='DC_lin':
+        text_ypos = [0.1412, 0.4249, 0.6146, 0.7151, 0.79, 0.895]
+        significant_comps = [4, 5, 5, 5, 5,
+                             5, 5, 5, 5, 5,
+                             6, 6, 6, 6, 6,
+                             6, 6, 6, 6, 6,
+                             6, 6, 6, 6, 6,
+                             6, 6, 7, 7, 7]
+
+    kstrings = [r'$k=' + str(c+1) + r'$' for c in range(5)]
+    kstrings.append(r'$6\leq k \leq 30$')
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.85)
+    for i in range(6):
+        ax1.text(1.3, text_ypos[i], kstrings[i], bbox=props)
+
+    ax2 = plt.subplot(2,1,2)
+    left = betas - 0.02
+    ax2.bar(left, significant_comps, width=0.05*0.8, color=blue)
+    ax2.set_xlabel(r'$\beta$')
+    ax2.set_ylabel('Number of statistically\n significant components')
+    ax2.set_xlim(0.05, 1.5)
+    ax2.set_ylim(0.0, 7.5)
+
+    fig.suptitle(get_pretty_mode(mode[-3:]))
+    fig.tight_layout()
+    fig.subplots_adjust(top=0.95)
+
+    plt.savefig('results/figures/lambda_vs_beta_' + mode + '.pdf')
+
+
+    return lambdas, cum_lambds
+
+
