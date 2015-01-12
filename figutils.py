@@ -1,5 +1,9 @@
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
+import shapefile
+from mpl_toolkits.basemap import Basemap
+from matplotlib.collections import LineCollection
+from scipy.optimize import curve_fit as fit
 import matplotlib
 import numpy as np
 import networkx as nx
@@ -853,7 +857,8 @@ def flow_characteristic_mesh(solvermode='DC_lin', char='mean_abs_flow', interact
 
 
 ### Principal component analysis plots #############################
-def Farmer_crit_plot(capacities, solvermode, filename=None, interactive=True):
+def Farmer_crit_plot(capacities, solvermode, filename=None, interactive=True,
+        title=True, curvefit=False):
     plt.close('all')
     plt.ioff()
     if interactive:
@@ -862,6 +867,7 @@ def Farmer_crit_plot(capacities, solvermode, filename=None, interactive=True):
     Phi, K = PCA.FtoPhi(F)
     Nnodes = Phi.shape[0]
     Phi_c, mean_Phi = PCA.center(Phi)
+    print "mean_Phi", mean_Phi
     h, Ntilde = PCA.normalize(Phi_c)
 
     lambdas = np.empty(Nnodes)
@@ -869,12 +875,28 @@ def Farmer_crit_plot(capacities, solvermode, filename=None, interactive=True):
         lambdas[k] = PCA.get_principal_component(h, k)[0]
         xi = PCA.get_xi_weight(h, k)
         assert(np.mean(xi**2)-lambdas[k] <= 1e-8)
+    print "cumsum lambdas", np.cumsum(lambdas)
 
-    plt.semilogy(1+np.arange(Nnodes), lambdas, '.')
-    plt.ylim(1e-6,1.0)
+    loglambdas = [np.log(lam) for lam in lambdas]
+
+
+    # curvefit
+    if curvefit:
+        fitfunc = lambda x, a, b: a*x+b
+        ks = 1+np.arange(Nnodes)
+        fitparams, fitcov = fit(fitfunc, ks[7:25], loglambdas[7:25])
+        print fitparams, fitcov
+        plt.plot(np.arange(31),\
+                fitfunc(np.arange(31), fitparams[0], fitparams[1]), color=red)
+
+
+    plt.plot(1+np.arange(Nnodes), loglambdas, '.', color=blue)
+
+    plt.ylim(-12,0)
     plt.xlabel(r'$k$')
-    plt.ylabel(r'$\lambda_k$')
-    plt.title(solvermode + ': ' + capacities)
+    plt.ylabel(r'$\ln \lambda_k$')
+    if title:
+        plt.title(solvermode + ': ' + capacities)
     figfilename = 'lambdavsk_' + solvermode + '_' + capacities + '.pdf'
     if not interactive:
         plt.savefig('./results/figures/FarmerCritPlots/' + figfilename)
@@ -1053,7 +1075,7 @@ def lin_vs_sqr_allcomp_barplot(interactive=False):
 
 
 def PC_graph(capacities, solvermode, comp_number, filename=None,\
-        figfilename=None, savepath='./results/figures/PCgraphs/'):
+        figfilename=None, savepath='./results/figures/PCgraphs/', notitle=True):
     plt.close('all')
     plt.ion()
 
@@ -1069,7 +1091,12 @@ def PC_graph(capacities, solvermode, comp_number, filename=None,\
     print Phi_PC
     F_PC = PCA.PhitoF(Phi_PC, K)
 
-    title = solvermode + ': ' + capacities + ' k=' + str(comp_number+1)
+    if not notitle:
+        title = solvermode + ': ' + capacities + ' k=' + str(comp_number+1)
+    else:
+        title=None
+
+
     if not figfilename:
         figfilename = 'PCgraph_'+solvermode+'_'+capacities+'_k'\
                        +str(comp_number+1)+'.pdf'
@@ -1182,17 +1209,129 @@ def make_europe_graph(lambd, comp_number, link_weights, node_weights,\
     cb1 = matplotlib.colorbar.ColorbarBase(ax1, cmap, orientation='vhorizontal')
     cb1.set_ticks([0, 0.5, 1])
     cb1.set_ticklabels(['-1', '0', '1'])
-    ax1.set_xlabel(r'$\Phi_n^k$' + ' [normalized]')
+    strk = str(comp_number+1)
+    ax1.set_xlabel(r'$\Phi_n^{(' + strk + ')}$' + ' [normalized]')
     ax1.xaxis.set_label_position('top')
     ax1.set_xticks('none')
     ax2.axis('off')
-    strk = str(comp_number+1)
     strpercentlambd = '%2.1f' % (100*lambd)
-    ax2.text(-0.1, 1.1, r'$\lambda_'+strk+'='+strpercentlambd+'\%$')
+    lambdtxt = r'$\lambda_'+strk+'='+strpercentlambd+'\%$'
+    props = dict(boxstyle='round', facecolor='w')
+    ax2.text(-0.1, 1.15, lambdtxt, bbox=props)
     if title!=None:
         fig.suptitle(title)
     fig.savefig(savepath+figfilename)
 
     return G
+
+def compare_linsqr_PCmaps():
+    plt.close('all')
+    fig = plt.figure()
+
+    modes = ['DC_lin', 'DC_sqr']
+    comp_numbers = range(7)
+
+    for mode in modes:
+        F = PCA.load_flows(capacities='copper', solvermode=mode)
+        Phi, K = PCA.FtoPhi(F)
+        Nnodes = Phi.shape[0]
+        Phi_c, mean_Phi = PCA.center(Phi)
+        h, Ntilde = PCA.normalize(Phi_c)
+        for comp_number in comp_numbers:
+            #PCA
+            lambd, PC = PCA.get_principal_component(h, comp_number)
+            Phi_PC = PCA.unnormalize_uncenter(PC, Ntilde, mean_Phi)
+
+            #plotting
+            subplotindex = 1 + comp_number + 7*modes.index(mode)
+            print comp_number, mode
+            print subplotindex
+            ax = plt.subplot(2, 7, subplotindex)
+            plot_europe_map(Phi_PC, ax)
+            strk = str(comp_number+1)
+            strpercentlambd = '%2.1f' % (100*lambd)
+            ax.set_xlabel(r'$\lambda_' + strk + '=' + strpercentlambd + '\%$')
+            if np.mod(subplotindex, 7)==4:
+                mode_labels = ['Localized flow', 'Synchronized flow']
+                label_index = subplotindex/7 # integer division
+                ax.set_title(mode_labels[label_index])
+            plt.box(on='off')
+
+    # colorbar
+    fig.subplots_adjust(bottom=0.49)
+    cbar_ax = fig.add_axes([0.25, 0.37, 0.5, 0.05])
+
+    redgreendict = {'red':[(0.0, 1.0, 1.0), (0.5, 1.0, 1.0) ,(1.0, 0.0, 0.0)],
+                    'green':[(0.0, 0.0, 0.0), (0.5, 1.0, 1.0), (1.0, 1.0, 1.0)],
+                    'blue':[(0.0, 0.2, 0.0), (0.5, 1.0, 1.0), (1.0, 0.2, 0.0)]}
+    cmap = LinearSegmentedColormap('redgreen', redgreendict, 1000)
+    cb1 = matplotlib.colorbar.ColorbarBase(cbar_ax, cmap,\
+                                             orientation='vhorizontal')
+    cb1.set_ticks([0, 0.5, 1])
+    cb1.set_ticklabels(['-1', '0', '1'])
+    cbar_ax.set_xlabel(r'$\Phi_n^{(k)}$' + ' [normalized]')
+    cbar_ax.xaxis.set_label_position('top')
+    cbar_ax.set_xticks('none')
+
+    fig.savefig('results/figures/compare_linsqr_maps.pdf')
+
+
+def plot_europe_map(country_weights, ax=None):
+
+    #plt.close('all')
+    #plt.ion()
+    #myfig = plt.figure()
+    if ax==None:
+        ax = plt.subplot(111)
+    m = Basemap(llcrnrlon=-10., llcrnrlat=30., urcrnrlon=50., urcrnrlat=72.,\
+                        projection='lcc', lat_1=40., lat_2=60., lon_0=20.,\
+                                    resolution ='l', area_thresh=1000.,\
+                                    rsphere=(6378137.00, 6356752.3142))
+    #m.drawcountries(linewidth=0.5)
+    m.drawcoastlines(linewidth=0)
+    r = shapefile.Reader(\
+            r'data/ne_10m_admin_0_countries/ne_10m_admin_0_countries')
+    all_shapes = r.shapes()
+    all_records = r.records()
+    shapes = []
+    records = []
+    for country in all_countries:
+        shapes.append(all_shapes[shapefile_index[country]])
+        records.append(all_records[shapefile_index[country]])
+
+
+
+    redgreendict = {'red':[(0.0, 1.0, 1.0), (0.5, 1.0, 1.0) ,(1.0, 0.0, 0.0)],
+                    'green':[(0.0, 0.0, 0.0), (0.5, 1.0, 1.0), (1.0, 1.0, 1.0)],
+                    'blue':[(0.0, 0.2, 0.0), (0.5, 1.0, 1.0), (1.0, 0.2, 0.0)]}
+
+    cmap = LinearSegmentedColormap('redgreen', redgreendict, 1000)
+
+
+    weights_length = np.sqrt(np.sum(country_weights**2))
+    norm_center_countryweights = [w/(2*weights_length) + 0.5 for w in country_weights]
+
+    country_count = 0
+    for record, shape in zip(records, shapes):
+        lons, lats = zip(*shape.points)
+        data = np.array(m(lons, lats)).T
+
+        if len(shape.parts) == 1:
+            segs = [data,]
+        else:
+            segs = []
+            for i in range(1, len(shape.parts)):
+                index = shape.parts[i-1]
+                index2 = shape.parts[i]
+                segs.append(data[index:index2])
+            segs.append(data[index2:])
+
+        lines = LineCollection(segs, antialiaseds=(1,))
+        lines.set_facecolor(cmap(norm_center_countryweights[country_count]))
+        lines.set_edgecolors('k')
+        lines.set_linewidth(0.3)
+        ax.add_collection(lines)
+
+        country_count += 1
 
 
