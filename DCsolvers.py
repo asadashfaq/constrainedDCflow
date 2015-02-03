@@ -221,21 +221,69 @@ def _solve_DC_flows_(network, N, t, mode, sum_of_squared_flows, mean_loads):
     # the synchronized flow (square) only need the first step to uniquely
     # determine the injection pattern and thus the flows
     if 'square' in mode:
-        try:
-            tries += 1
-            result = [var.x for var in network.getVars()]
-        except gb.GurobiError as error:
-            tries += 1
-            print "Model status: ", network.status
-            print "First step error, timestep: %i" % t
-            print type(error)
-            print error.errno
-            network_relaxed = network.copy()
-            network_relaxed.feasRelaxS(0,0,0,1)
-            network_relaxed.update()
-            relaxed += 1
-            network_relaxed.optimize()
-            result = [var.x for var in network_relaxed.getVars()[0:(3*Nnodes)]]
+        if 'twostep' not in mode:
+            try:
+                tries += 1
+                result = [var.x for var in network.getVars()]
+            except gb.GurobiError as error:
+                tries += 1
+                print "Model status: ", network.status
+                print "First step error, timestep: %i" % t
+                print type(error)
+                print error.errno
+                network_relaxed = network.copy()
+                network_relaxed.feasRelaxS(0,0,0,1)
+                network_relaxed.update()
+                relaxed += 1
+                network_relaxed.optimize()
+                result = [var.x for var in \
+                            network_relaxed.getVars()[0:(3*Nnodes)]]
+        elif 'twostep' in mode:
+            step1_bal = [b.x for b in balancing_vars]
+            step1_curt = [c.x for c in curtailment_vars]
+            # make sure backup and curtailment matches first step
+            for n in range(Nnodes):
+                balancing_vars[n].ub = step1_bal[n]*1.00000001
+                balancing_vars[n].lb = step1_bal[n]*0.99999999
+                curtailment_vars[n].ub = step1_curt[n]*1.00000001
+                curtailment_vars[n].lb = step1_curt[n]*0.99999999
+
+            # set step 2 objective, minimize squared flows
+            network.setObjective(expr=sum_of_squared_flows, sense=1)
+            network.update()
+            try:
+                tries += 1
+                network.optimize()
+                result = [var.x for var in network.getVars()]
+            except gb.GurobiError:
+                try:
+                    tries += 1
+                    print "Model status: ", network.status
+                    network.getConstrs()[-1].setAttr("rhs", bal_opt*1.00001)
+                    network.optimize()
+                    result = [var.x for var in network.getVars()]
+                    relaxed += 1
+                except gb.GurobiError as error:
+                    tries += 1
+                    print "Model status: ", network.status
+                    print "Second step error, timestep: %i" % t
+                    print type(error)
+                    print error.errno
+                    network_relaxed = network.copy()
+                    network_relaxed.feasRelaxS(0,0,0,1)
+                    network_relaxed.update()
+                    relaxed += 1
+                    network_relaxed.optimize()
+                    result = [var.x for var in \
+                                network_relaxed.getVars()[0:(3*Nnodes)]]
+
+            # clean up
+            for n in range(Nnodes):
+                balancing_vars[n].ub = gb.GRB.INFINITY
+                balancing_vars[n].lb = 0.0
+                curtailment_vars[n].ub = gb.GRB.INFINITY
+                curtailment_vars[n].lb = 0.0
+
 
     # the localized flow (linear) need a second optimization step to uniquely
     # determine the injection pattern
@@ -280,6 +328,7 @@ def _solve_DC_flows_(network, N, t, mode, sum_of_squared_flows, mean_loads):
 #### Clean up ###########################################################
         network.remove(network.getConstrs()[-1])
         network.update()
+
     else:
         print "Error: Mode not understood, network not solved.\
                 Try 'linear' or 'square'"
