@@ -1088,6 +1088,10 @@ def PC_graph(capacities, solvermode, comp_number, filename=None,\
     lambd, PC = PCA.get_principal_component(h, comp_number)
 
     Phi_PC = PCA.unnormalize_uncenter(PC, Ntilde, mean_Phi)
+    # the following if statement changes direction of k=2 to
+    # make it consistent with the constrained figures
+    if comp_number==1:
+        Phi_PC *= -1
     print Phi_PC
     F_PC = PCA.PhitoF(Phi_PC, K)
 
@@ -1225,6 +1229,12 @@ def make_europe_graph(lambd, comp_number, link_weights, node_weights,\
     return G
 
 def compare_linsqr_PCmaps():
+    """ Make a plot with maps of Europe comparing the first
+        7 principle components in the localized and the synchronized
+        unconstrained flow pattern.
+
+        """
+
     plt.close('all')
     fig = plt.figure()
 
@@ -1247,6 +1257,10 @@ def compare_linsqr_PCmaps():
             print comp_number, mode
             print subplotindex
             ax = plt.subplot(2, 7, subplotindex)
+            # the following if statement changes direction of k=2 to
+            # make it consistent with the constrained figures
+            if comp_number == 1:
+                Phi_PC *= -1
             plot_europe_map(Phi_PC, ax)
             strk = str(comp_number+1)
             strpercentlambd = '%2.1f' % (100*lambd)
@@ -1274,6 +1288,109 @@ def compare_linsqr_PCmaps():
     cbar_ax.set_xticks('none')
 
     fig.savefig('results/figures/compare_linsqr_maps.pdf')
+
+
+def constrained_PC_maps(mode='DC_lin', k4to7=False):
+
+    plt.close('all')
+    fig = plt.figure(figsize=(8, 14))
+    plt.ion()
+
+    comp_numbers = range(3)
+    capacities = ['copper', '1.25q99', '1.0q99', '0.75q99', '0.5q99', \
+                  '0.25q99', '0.05q99']
+
+    ylabels = [r'$\beta=' + cap[:-3] + r'$' for cap in capacities]
+    ylabels[0] = r'$\beta=\infty $'
+    props = dict(boxstyle='round', facecolor='w', alpha=0.85)
+
+    if mode=='DC_lin':
+        mirrorfactors = [1, -1, 1,
+                         1, -1, 1,
+                         1, -1, 1,
+                         1, 1, -1,
+                         1, -1, -1,
+                         -1, -1, -1,
+                         -1, -1, -1]
+        if k4to7:
+             mirrorfactors = [1, 1, 1, 1,
+                             1, 1, 1, 1,
+                             1, 1, 1, 1,
+                             -1, -1, -1, -1,
+                             -1, -1, -1, -1,
+                             1, -1, 1, 1,
+                             1, 1, 1, 1]
+             comp_numbers = [3, 4, 5, 6]
+    if mode=='DC_sqr':
+        mirrorfactors = [1, -1, 1,
+                         1, -1, 1,
+                         1, -1, 1,
+                         1, -1, 1,
+                         1, -1, 1,
+                         1, -1, -1,
+                         -1, -1, -1]
+        if k4to7:
+             mirrorfactors = [1, 1, 1, 1,
+                             -1, 1, 1, 1,
+                             -1, 1, 1, 1,
+                             -1, 1, 1, 1,
+                             -1, 1, 1, 1,
+                             -1, -1, -1, -1,
+                             -1, 1, -1, -1]
+             comp_numbers = [3, 4, 5, 6]
+
+
+
+    titles = [r'$k=' + str(c+1) + r'$' for c in comp_numbers]
+
+    for c in capacities:
+        F = PCA.load_flows(capacities=c, solvermode=mode)
+        Phi, K = PCA.FtoPhi(F)
+        Nnodes = Phi.shape[0]
+        Phi_c, mean_Phi = PCA.center(Phi)
+        h, Ntilde = PCA.normalize(Phi_c)
+        for comp_number in comp_numbers:
+            #PCA
+            lambd, PC = PCA.get_principal_component(h, comp_number)
+            Phi_PC = PCA.unnormalize_uncenter(PC, Ntilde, mean_Phi)
+
+            #plotting
+            subplotindex = 1 + comp_numbers.index(comp_number)\
+                            + len(comp_numbers)*capacities.index(c)
+            print comp_number, mode
+            print subplotindex
+            ax = plt.subplot(7, len(comp_numbers), subplotindex)
+            plot_europe_map(Phi_PC*mirrorfactors[subplotindex-1], ax)
+            plt.box(on='off')
+            if np.mod(subplotindex, len(comp_numbers))==1:
+                ax.set_ylabel(ylabels[subplotindex/len(comp_numbers)],\
+                        rotation=0, bbox=props)
+            if subplotindex<=len(comp_numbers):
+                ax.set_title(titles[subplotindex-1], bbox=props)
+    # colorbar
+    fig.subplots_adjust(bottom=0.1)
+    cbar_ax = fig.add_axes([0.1, 0.035, 0.8, 0.03])
+
+    redgreendict = {'red':[(0.0, 1.0, 1.0), (0.5, 1.0, 1.0) ,(1.0, 0.0, 0.0)],
+                    'green':[(0.0, 0.0, 0.0), (0.5, 1.0, 1.0), (1.0, 1.0, 1.0)],
+                    'blue':[(0.0, 0.2, 0.0), (0.5, 1.0, 1.0), (1.0, 0.2, 0.0)]}
+    cmap = LinearSegmentedColormap('redgreen', redgreendict, 1000)
+    cb1 = matplotlib.colorbar.ColorbarBase(cbar_ax, cmap,\
+                                             orientation='vhorizontal')
+    cb1.set_ticks([0, 0.5, 1])
+    cb1.set_ticklabels(['-1', '0', '1'])
+    cbar_ax.set_xlabel(r'$\Phi_n^{(k)}$' + ' [normalized]')
+    cbar_ax.xaxis.set_label_position('top')
+    cbar_ax.set_xticks('none')
+
+    fig.suptitle(get_pretty_mode(mode[-3:]), fontsize=16, y=0.96)
+
+    if not k4to7:
+        fig.savefig('results/figures/constrained_PC_maps_' + mode + '.pdf')
+        fig.savefig('results/figures/constrained_PC_maps_' + mode + '.png')
+    if k4to7:
+        fig.savefig('results/figures/figconstrained_PC_maps_' + mode\
+                    + '_k4-7.pdf')
 
 
 def plot_europe_map(country_weights, ax=None):
